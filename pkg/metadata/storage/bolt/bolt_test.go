@@ -191,3 +191,34 @@ func Test_boltStorage_Delete(t *testing.T) {
 		})
 	}
 }
+
+func Test_boltStorage_Dump(t *testing.T) {
+	store := New("/zincsearch/test_dump")
+	defer store.Close()
+
+	want := map[string][]byte{
+		"/index/logs":       []byte(`{"name":"logs"}`),
+		"/index/audit":      []byte(`{"name":"audit"}`),
+		"/kv/stream_offset": []byte("42"),
+		"/user/admin":       []byte("hash"),
+	}
+	for key, value := range want {
+		assert.NoError(t, store.Set(key, value))
+	}
+
+	dumper, ok := store.(interface {
+		Dump() (map[string][]byte, error)
+	})
+	assert.True(t, ok, "the bolt storage can be dumped")
+	got, err := dumper.Dump()
+	assert.NoError(t, err)
+	for key, value := range want {
+		assert.Equal(t, value, got[key], key)
+	}
+
+	// The dump is a copy, not a view into the database.
+	got["/kv/stream_offset"][0] = 'X'
+	again, err := store.Get("/kv/stream_offset")
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("42"), again)
+}

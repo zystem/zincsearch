@@ -253,6 +253,10 @@ func (s *IndexShard) readRedoLog(option uint64) (uint64, uint64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	return parseRedoLog(v)
+}
+
+func parseRedoLog(v []byte) (uint64, uint64, error) {
 	vs := strings.Split(string(v), ":")
 	if len(vs) != 2 {
 		return 0, 0, fmt.Errorf("invalid redo log: [%s]", string(v))

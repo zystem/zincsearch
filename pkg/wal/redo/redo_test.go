@@ -129,3 +129,25 @@ func BenchmarkLogRead(b *testing.B) {
 		assert.NotNil(b, data)
 	}
 }
+
+func TestReadCopyIsIndependentOfLaterWrites(t *testing.T) {
+	log, err := Open("data/redoTestReadCopy", &Options{NoSync: true, NoCopy: true})
+	assert.NoError(t, err)
+	defer func() { _ = log.Close() }()
+
+	assert.NoError(t, log.Write(1, []byte("1:10")))
+
+	// With NoCopy, Read aliases the internal buffer, so an overwrite changes it.
+	shared, err := log.Read(1)
+	assert.NoError(t, err)
+	private, err := log.ReadCopy(1)
+	assert.NoError(t, err)
+	assert.Equal(t, "1:10", string(private))
+
+	assert.NoError(t, log.Write(1, []byte("7:99")))
+	assert.Equal(t, "7:99", string(shared))
+	assert.Equal(t, "1:10", string(private), "a copy is not affected by later writes")
+
+	_, err = log.ReadCopy(2)
+	assert.ErrorIs(t, err, ErrNotFound)
+}

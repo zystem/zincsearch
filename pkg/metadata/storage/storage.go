@@ -22,3 +22,9 @@ type Storager interface {
 	Delete(string) error
 	Close() error
 }
+
+// Dumper is implemented by storages that can list every key with its value.
+// It is what makes a backup of the node metadata possible.
+type Dumper interface {
+	Dump() (map[string][]byte, error)
+}

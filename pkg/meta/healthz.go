@@ -17,9 +17,24 @@ package meta
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 )
+
+var (
+	healthLock    sync.RWMutex
+	healthDetails = make(map[string]func() interface{})
+)
+
+// RegisterHealthDetail adds a named section to the /healthz response, e.g. the
+// replication state of the node. The endpoint stays 200 regardless of the
+// detail, so a node that lost its stream keeps serving searches.
+func RegisterHealthDetail(name string, detail func() interface{}) {
+	healthLock.Lock()
+	healthDetails[name] = detail
+	healthLock.Unlock()
+}
 
 // GetHealthz function gets all events
 //
@@ -29,9 +44,23 @@ import (
 // @Success 200 {object} HealthzResponse
 // @Router /healthz [get]
 func GetHealthz(c *gin.Context) {
-	c.JSON(http.StatusOK, HealthzResponse{Status: "ok"})
+	resp := HealthzResponse{Status: "ok"}
+	healthLock.RLock()
+	details := make(map[string]func() interface{}, len(healthDetails))
+	for name, detail := range healthDetails {
+		details[name] = detail
+	}
+	healthLock.RUnlock()
+	if len(details) > 0 {
+		resp.Details = make(map[string]interface{}, len(details))
+		for name, detail := range details {
+			resp.Details[name] = detail()
+		}
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 type HealthzResponse struct {
-	Status string `json:"status"`
+	Status  string                 `json:"status"`
+	Details map[string]interface{} `json:"details,omitempty"`
 }
