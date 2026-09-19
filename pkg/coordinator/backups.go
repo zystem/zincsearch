@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -407,6 +408,9 @@ func FetchBackup(ctx context.Context, st state.Store, blobs blob.Store, name str
 		rec = &r
 	}
 	rc, err := blobs.Get(ctx, rec.Name)
+	if errors.Is(err, blob.ErrNotFound) {
+		return nil, fmt.Errorf("%w: stored backup %s is missing: %w", ErrBackupDamaged, rec.Name, err)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -416,10 +420,16 @@ func FetchBackup(ctx context.Context, st state.Store, blobs blob.Store, name str
 		return nil, err
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); got != rec.SHA256 {
-		return nil, fmt.Errorf("stored backup %s is damaged: checksum %s, expected %s", rec.Name, got, rec.SHA256)
+		return nil, fmt.Errorf("%w: stored backup %s: checksum %s, expected %s", ErrBackupDamaged, rec.Name, got, rec.SHA256)
 	}
 	return rec, nil
 }
+
+// ErrBackupDamaged marks a failure that proves the stored backup itself is
+// unusable (missing object, checksum mismatch, archive that does not restore).
+// Every other error, such as an unreachable blob store, says nothing about the
+// backup and must not condemn it.
+var ErrBackupDamaged = errors.New("backup is damaged")
 
 func (c *Coordinator) saveRecord(ctx context.Context, r *BackupRecord) error {
 	rev, err := state.UpdateJSON(ctx, c.st, backupPrefix+r.Name, r, r.revision)
@@ -473,7 +483,9 @@ func (c *Coordinator) VerifyOnce(ctx context.Context) (err error) {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			c.markBad(ctx, r, err)
+			if errors.Is(err, ErrBackupDamaged) {
+				c.markBad(ctx, r, err)
+			}
 			errs = append(errs, fmt.Errorf("%s: %w", r.Name, err))
 			continue
 		}
@@ -493,7 +505,9 @@ func (c *Coordinator) VerifyOnce(ctx context.Context) (err error) {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				c.markBad(ctx, r, err)
+				if errors.Is(err, ErrBackupDamaged) {
+					c.markBad(ctx, r, err)
+				}
 				errs = append(errs, fmt.Errorf("%s: %w", r.Name, err))
 			}
 			break // only the newest usable backup is restored, it is the one that counts
@@ -506,7 +520,7 @@ func (c *Coordinator) VerifyOnce(ctx context.Context) (err error) {
 func (c *Coordinator) checkStored(ctx context.Context, r *BackupRecord) error {
 	rc, err := c.blobs.Get(ctx, r.Name)
 	if errors.Is(err, blob.ErrNotFound) {
-		return errors.New("the object is missing from the blob store")
+		return fmt.Errorf("%w: the object is missing from the blob store", ErrBackupDamaged)
 	}
 	if err != nil {
 		return err
@@ -517,7 +531,7 @@ func (c *Coordinator) checkStored(ctx context.Context, r *BackupRecord) error {
 		return err
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); got != r.SHA256 {
-		return fmt.Errorf("checksum %s does not match the recorded %s", got, r.SHA256)
+		return fmt.Errorf("%w: checksum %s does not match the recorded %s", ErrBackupDamaged, got, r.SHA256)
 	}
 	return nil
 }
@@ -536,7 +550,11 @@ func (c *Coordinator) deepVerify(ctx context.Context, r *BackupRecord) error {
 		return err
 	}
 	if err := c.verifier.Deep(ctx, tmp.Name()); err != nil {
-		return fmt.Errorf("restore in a scratch node failed: %w", err)
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return fmt.Errorf("%w: restore in a scratch node failed: %w", ErrBackupDamaged, err)
+		}
+		return fmt.Errorf("restore in a scratch node: %w", err)
 	}
 	now := c.cfg.Now()
 	r.Status, r.VerifiedAt, r.Note = BackupVerified, &now, ""

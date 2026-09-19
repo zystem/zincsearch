@@ -167,3 +167,26 @@ func TestCoreApplier_DocsBatchIsIdempotent(t *testing.T) {
 		assert.NoError(t, err, id)
 	}
 }
+
+func TestCoreApplier_InvalidDocumentIsPermanentAndDoesNotBlockTheBatch(t *testing.T) {
+	const name = "streaming_apply_invalid"
+	a := NewCoreApplier()
+	t.Cleanup(func() { _ = core.DeleteIndex(name) })
+
+	require.NoError(t, a.Apply(1, mustAdmin(t, name, OpCreateIndex, map[string]interface{}{
+		"mappings": map[string]interface{}{"properties": map[string]interface{}{"n": map[string]interface{}{"type": "numeric"}}},
+	})))
+
+	err := a.Apply(2, NewDoc(name, "bad", map[string]interface{}{"n": "abc"}))
+	require.Error(t, err)
+	assert.True(t, IsPermanent(err), "a document that violates the mapping can never succeed: %v", err)
+
+	batch := NewDocs(name, []Doc{
+		{ID: "ok1", Doc: map[string]interface{}{"n": 1}},
+		{ID: "bad", Doc: map[string]interface{}{"n": "abc"}},
+		{ID: "ok2", Doc: map[string]interface{}{"n": 2}},
+	})
+	require.NoError(t, a.Apply(3, batch))
+	require.NoError(t, a.Flush())
+	waitDocs(t, name, 2)
+}

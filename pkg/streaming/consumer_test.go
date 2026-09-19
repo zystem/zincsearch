@@ -18,6 +18,7 @@ package streaming
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -387,4 +388,29 @@ func TestConsumer_PauseAndDrainMakesTheIndexMatchTheOffset(t *testing.T) {
 	c.Resume()
 	waitApplied(t, c, 210)
 	waitDocs(t, name, 210)
+}
+
+func TestConsumer_DetectsAGapCreatedWhileItWasPaused(t *testing.T) {
+	const name = "streaming_consumer_pause_gap"
+	t.Cleanup(func() { _ = core.DeleteIndex(name) })
+	e := startNATS(t)
+	e.createStream(jetstream.StreamConfig{MaxMsgs: 3})
+	e.publishDocs(name, 1, 2)
+
+	c := e.consumer(&memStore{})
+	start(t, c)
+	waitApplied(t, c, 2)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	require.NoError(t, c.Pause(ctx))
+
+	// Retention drops messages 3..5 that the node has not read.
+	e.publishDocs(name, 3, 8)
+	c.Resume()
+
+	assert.Eventually(t, func() bool { return strings.Contains(c.Status().LastError, ErrGap.Error()) },
+		10*time.Second, 20*time.Millisecond, "status %+v", c.Status())
+	time.Sleep(300 * time.Millisecond)
+	assert.Equal(t, uint64(2), c.Status().LastApplied, "the node must not skip over the lost messages")
 }

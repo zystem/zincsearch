@@ -22,6 +22,8 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/rs/zerolog/log"
+
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/handlers/index"
 	"github.com/zincsearch/zincsearch/pkg/meta"
@@ -103,7 +105,7 @@ func (a *CoreApplier) applyDoc(seq uint64, m *Message) error {
 	// update=true replaces a document that already carries this ID, which makes
 	// a redelivered message harmless.
 	if err := idx.CreateDocument(id, m.Doc, true); err != nil {
-		return err
+		return classifyDocError(err)
 	}
 	a.mu.Lock()
 	a.touched[m.Index] = struct{}{}
@@ -127,6 +129,12 @@ func (a *CoreApplier) applyDocs(seq uint64, m *Message) error {
 			id = fmt.Sprintf("seq-%d-%d", seq, i)
 		}
 		if err := idx.CreateDocument(id, d.Doc, true); err != nil {
+			var invalid *core.InvalidDocumentError
+			if errors.As(err, &invalid) {
+				// Only this document is bad; the others of the batch still apply.
+				log.Warn().Err(err).Str("index", m.Index).Uint64("seq", seq).Int("pos", i).Msg("streaming: skipping invalid document")
+				continue
+			}
 			return err
 		}
 	}
@@ -134,6 +142,16 @@ func (a *CoreApplier) applyDocs(seq uint64, m *Message) error {
 	a.touched[m.Index] = struct{}{}
 	a.mu.Unlock()
 	return nil
+}
+
+// classifyDocError marks content errors permanent so they are skipped instead
+// of retried forever; storage errors stay transient.
+func classifyDocError(err error) error {
+	var invalid *core.InvalidDocumentError
+	if errors.As(err, &invalid) {
+		return &PermanentError{Err: err}
+	}
+	return err
 }
 
 func applyAdmin(m *Message) error {

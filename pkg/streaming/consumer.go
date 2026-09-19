@@ -265,8 +265,14 @@ func (c *Consumer) run(ctx context.Context, js jetstream.JetStream) {
 	var cons jetstream.Consumer
 	lastLag := time.Time{}
 	for ctx.Err() == nil {
-		if !c.parkIfPaused(ctx) {
+		wasPaused, ok := c.parkIfPaused(ctx)
+		if !ok {
 			return
+		}
+		if wasPaused {
+			// Retention may have trimmed the stream while paused: the cursor is
+			// recreated and the position checked again.
+			cons = nil
 		}
 		if cons == nil {
 			var err error
@@ -277,7 +283,7 @@ func (c *Consumer) run(ctx context.Context, js jetstream.JetStream) {
 				continue
 			}
 		}
-		n, err := c.step(ctx, cons)
+		n, err := c.step(ctx, stream, cons)
 		if err != nil {
 			// Recreate the cursor at the saved offset; whatever was not saved is
 			// delivered and applied again.
@@ -297,12 +303,13 @@ func (c *Consumer) run(ctx context.Context, js jetstream.JetStream) {
 	}
 }
 
-// parkIfPaused blocks while the consumer is paused. It returns false when the
-// consumer was stopped meanwhile.
-func (c *Consumer) parkIfPaused(ctx context.Context) bool {
+// parkIfPaused blocks while the consumer is paused. It reports whether it had to
+// wait, and returns ok=false when the consumer was stopped meanwhile.
+func (c *Consumer) parkIfPaused(ctx context.Context) (waited, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for c.paused {
+		waited = true
 		if !c.parked {
 			c.parked = true
 			c.signalLocked()
@@ -313,12 +320,12 @@ func (c *Consumer) parkIfPaused(ctx context.Context) bool {
 		case <-wake:
 		case <-ctx.Done():
 			c.mu.Lock()
-			return false
+			return waited, false
 		}
 		c.mu.Lock()
 	}
 	c.parked = false
-	return ctx.Err() == nil
+	return waited, ctx.Err() == nil
 }
 
 // prepare (re)creates the JetStream cursor at the node's saved offset.
@@ -333,17 +340,9 @@ func (c *Consumer) prepare(ctx context.Context, js jetstream.JetStream) (jetstre
 	}
 	c.streamLast.Store(info.State.LastSeq)
 
-	need := c.applied.Load() + 1
-	first := info.State.FirstSeq
-	if info.State.Msgs == 0 {
-		first = info.State.LastSeq + 1
-	}
-	if need < first {
-		if !c.cfg.AllowGap {
-			return nil, nil, fmt.Errorf("%w: node needs message %d, stream starts at %d", ErrGap, need, first)
-		}
-		log.Warn().Uint64("needed", need).Uint64("first", first).Msg("stream gap accepted, messages are lost")
-		need = first
+	need, err := c.checkGap(info)
+	if err != nil {
+		return nil, nil, err
 	}
 	if need > info.State.LastSeq+1 {
 		return nil, nil, fmt.Errorf("%w: node needs message %d, stream ends at %d", ErrAhead, need, info.State.LastSeq)
@@ -373,9 +372,27 @@ func (c *Consumer) prepare(ctx context.Context, js jetstream.JetStream) (jetstre
 	return stream, cons, nil
 }
 
+// checkGap returns the sequence to continue at, or ErrGap when the stream was
+// trimmed past the node's position and gaps are not allowed.
+func (c *Consumer) checkGap(info *jetstream.StreamInfo) (uint64, error) {
+	need := c.applied.Load() + 1
+	first := info.State.FirstSeq
+	if info.State.Msgs == 0 {
+		first = info.State.LastSeq + 1
+	}
+	if need >= first {
+		return need, nil
+	}
+	if !c.cfg.AllowGap {
+		return 0, fmt.Errorf("%w: node needs message %d, stream starts at %d", ErrGap, need, first)
+	}
+	log.Warn().Uint64("needed", need).Uint64("first", first).Msg("stream gap accepted, messages are lost")
+	return first, nil
+}
+
 // step fetches one batch and makes it durable. It returns how many messages
 // were delivered.
-func (c *Consumer) step(ctx context.Context, cons jetstream.Consumer) (int, error) {
+func (c *Consumer) step(ctx context.Context, stream jetstream.Stream, cons jetstream.Consumer) (int, error) {
 	batch, err := cons.Fetch(c.cfg.Batch, jetstream.FetchMaxWait(c.cfg.FetchWait))
 	if err != nil {
 		return 0, fmt.Errorf("fetch: %w", err)
@@ -394,6 +411,17 @@ func (c *Consumer) step(ctx context.Context, cons jetstream.Consumer) (int, erro
 	applied := c.applied.Load()
 	last := applied
 	var applyErr error
+	// The first message must follow the saved position. When it does not, the
+	// stream may have dropped messages while the cursor was live.
+	if md, err := msgs[0].Metadata(); err == nil && md.Sequence.Stream > applied+1 {
+		info, err := stream.Info(ctx)
+		if err != nil {
+			return len(msgs), fmt.Errorf("stream info: %w", err)
+		}
+		if _, err := c.checkGap(info); err != nil {
+			return len(msgs), err
+		}
+	}
 	for _, m := range msgs {
 		md, err := m.Metadata()
 		if err != nil {

@@ -19,7 +19,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -509,7 +512,8 @@ func (v *fakeVerifier) Deep(_ context.Context, path string) error {
 	}
 	v.got = data
 	if v.fail {
-		return errors.New("index logs holds 3 documents after the restore, the backup says 4")
+		exit := exec.Command("sh", "-c", "exit 1").Run()
+		return fmt.Errorf("%w: index logs holds 3 documents after the restore, the backup says 4", exit)
 	}
 	return nil
 }
@@ -675,4 +679,70 @@ func TestRunElectsPollsAndFailsOverByItself(t *testing.T) {
 	ok, err := other.Acquire(ctx)
 	require.NoError(t, err)
 	assert.True(t, ok)
+}
+
+// flakyBlobs fails reads while down is set, like an S3 503.
+type flakyBlobs struct {
+	blob.Store
+	mu   sync.Mutex
+	down bool
+}
+
+func (f *flakyBlobs) setDown(v bool) { f.mu.Lock(); f.down = v; f.mu.Unlock() }
+
+func (f *flakyBlobs) Get(ctx context.Context, name string) (io.ReadCloser, error) {
+	f.mu.Lock()
+	down := f.down
+	f.mu.Unlock()
+	if down {
+		return nil, errors.New("503 slow down")
+	}
+	return f.Store.Get(ctx, name)
+}
+
+func TestVerificationDoesNotCondemnBackupsOnATransientStorageError(t *testing.T) {
+	cl := newCluster(t)
+	flaky := &flakyBlobs{Store: cl.blobs}
+	cl.blobs = flaky
+	v := &fakeVerifier{}
+	c := cl.coordinator("main", []NodeConfig{cl.nodes["a"].config("a"), cl.nodes["b"].config("b")}, v)
+	c.PollOnce(ctx)
+	c.refreshCluster(ctx)
+	rec, err := c.BackupOnce(ctx)
+	require.NoError(t, err)
+
+	flaky.setDown(true)
+	require.Error(t, c.VerifyOnce(ctx))
+	recs, _ := c.Backups(ctx)
+	require.Len(t, recs, 1)
+	assert.NotEqual(t, BackupBad, recs[0].Status, "an unreachable store proves nothing about the backup")
+
+	// Prune must keep it as well.
+	require.NoError(t, c.Prune(ctx))
+	flaky.setDown(false)
+	cl.clk.advance(24 * time.Hour)
+	require.NoError(t, c.VerifyOnce(ctx))
+	usable, err := c.LatestUsable(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, rec.Name, usable.Name)
+	assert.Equal(t, BackupVerified, usable.Status)
+}
+
+type brokenVerifier struct{}
+
+func (brokenVerifier) Deep(context.Context, string) error {
+	return errors.New("fork/exec: no such file")
+}
+
+func TestDeepVerifierThatCannotRunDoesNotMarkTheBackupBad(t *testing.T) {
+	cl := newCluster(t)
+	c := cl.coordinator("main", []NodeConfig{cl.nodes["a"].config("a"), cl.nodes["b"].config("b")}, brokenVerifier{})
+	c.PollOnce(ctx)
+	c.refreshCluster(ctx)
+	_, err := c.BackupOnce(ctx)
+	require.NoError(t, err)
+	require.Error(t, c.VerifyOnce(ctx))
+	recs, _ := c.Backups(ctx)
+	require.Len(t, recs, 1)
+	assert.NotEqual(t, BackupBad, recs[0].Status)
 }
