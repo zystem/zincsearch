@@ -25,6 +25,7 @@ steps:
       - CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o build/amd64/zinccoordinator ./cmd/zinccoordinator
     when:
       - event: push
+        branch: main
       - event: pull_request
       - event: tag
 
