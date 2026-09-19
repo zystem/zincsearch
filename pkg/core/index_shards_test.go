@@ -74,7 +74,7 @@ func TestIndex_Shards(t *testing.T) {
 			assert.NoError(t, err)
 
 			// wait for WAL write to index
-			time.Sleep(time.Second)
+			waitWAL(t, index)
 
 			if err := index.GetShardByDocID(tt.args.docID).NewShard(); (err != nil) != tt.wantErr {
 				t.Errorf("Index.NewShard() error = %v, wantErr %v", err, tt.wantErr)

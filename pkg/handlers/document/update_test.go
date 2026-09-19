@@ -18,7 +18,6 @@ package document
 import (
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -98,7 +97,7 @@ func TestUpdate(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "")
 
 		// wait for WAL write to index
-		time.Sleep(time.Second)
+		utils.WaitWALByName(t, "TestDocumentUpdate.index_1")
 	})
 
 	for _, tt := range tests {

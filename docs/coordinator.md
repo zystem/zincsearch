@@ -77,6 +77,7 @@ stream name.
 | `COORD_PROMOTE_COOLDOWN`    | Minimum time between promotions. Default `1m`.                          |
 | `COORD_BACKUP_INTERVAL`     | Default `1h`; negative switches scheduled backups off.                  |
 | `COORD_BACKUP_RETENTION`    | Backups kept. Default `3`.                                              |
+| `COORD_ORPHAN_GRACE`        | Objects in the bucket that the state does not know are deleted by the prune once they are older than this and the state knows at least one usable backup. Default `24h`; negative only reports them. |
 | `COORD_DRAIN_TIMEOUT`       | How long a node may take to pause before a backup. Default `10m`.       |
 | `COORD_VERIFY_INTERVAL`     | Default `24h`; negative switches verification off.                      |
 | `COORD_ZINC_BIN`            | Path of `zincsearch`. Turns on the restore-and-count verification.      |
@@ -191,3 +192,17 @@ is in that state.
   replica and nothing flips back.
 * Only the leader promotes, with a compare-and-set on the shared state, so two
   coordinators never promote twice.
+
+## Container
+
+`docker/Dockerfile.coordinator` builds an image with `zinccoordinator` and the
+`zincsearch` binary that the daily deep verification runs (`COORD_ZINC_BIN`).
+
+```shell
+docker build -f docker/Dockerfile.coordinator -t zinc-coordinator .
+```
+
+`examples/coordinator/docker-compose.yml` starts a complete system: NATS, s3proxy
+as the S3 endpoint, two nodes and the coordinator. It was run end to end: ingest,
+hourly-style backups to S3, verification, retention, and failover after killing
+the master.

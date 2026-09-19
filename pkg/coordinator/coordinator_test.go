@@ -746,3 +746,39 @@ func TestDeepVerifierThatCannotRunDoesNotMarkTheBackupBad(t *testing.T) {
 	require.Len(t, recs, 1)
 	assert.NotEqual(t, BackupBad, recs[0].Status)
 }
+
+func TestPruneDeletesOnlyOldOrphanObjects(t *testing.T) {
+	cl := newCluster(t)
+	cl.poll()
+	rec, err := cl.c.BackupOnce(ctx)
+	require.NoError(t, err)
+
+	put := func(name string, age time.Duration) {
+		require.NoError(t, cl.blobs.Put(ctx, name, bytes.NewReader([]byte("x")), 1))
+		at := cl.clk.now().Add(-age)
+		require.NoError(t, os.Chtimes(filepath.Join(cl.dir, "blobs", name), at, at))
+	}
+	put("zincsearch-old-orphan.tgz", 48*time.Hour)
+	put("zincsearch-fresh-orphan.tgz", time.Hour)
+	put("unrelated.txt", 48*time.Hour)
+
+	require.NoError(t, cl.c.Prune(ctx))
+	infos, _ := cl.blobs.List(ctx, "")
+	var names []string
+	for _, in := range infos {
+		names = append(names, in.Name)
+	}
+	assert.ElementsMatch(t, []string{rec.Name, "zincsearch-fresh-orphan.tgz", "unrelated.txt"}, names,
+		"only the old orphan backup is removed: the fresh one may still be recorded, the other is not ours")
+}
+
+func TestPruneKeepsOrphansWhenTheStateKnowsNoBackup(t *testing.T) {
+	cl := newCluster(t)
+	require.NoError(t, cl.blobs.Put(ctx, "zincsearch-lost.tgz", bytes.NewReader([]byte("x")), 1))
+	at := cl.clk.now().Add(-72 * time.Hour)
+	require.NoError(t, os.Chtimes(filepath.Join(cl.dir, "blobs", "zincsearch-lost.tgz"), at, at))
+
+	require.NoError(t, cl.c.Prune(ctx))
+	infos, _ := cl.blobs.List(ctx, "")
+	assert.Len(t, infos, 1, "after a state loss the objects may be the only copies")
+}

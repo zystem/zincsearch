@@ -3,7 +3,6 @@ package search
 import (
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/assert"
@@ -116,7 +115,7 @@ func TestDeleteByQuery(t *testing.T) {
 			assert.NoError(t, core.StoreIndex(index))
 			id := ider.Generate()
 			assert.NoError(t, index.CreateDocument(id, test.arg.doc, false))
-			time.Sleep(time.Second)
+			utils.WaitWAL(t, index)
 
 			c, w := utils.NewGinContext()
 			utils.SetGinRequestData(c, test.arg.query)
@@ -124,7 +123,7 @@ func TestDeleteByQuery(t *testing.T) {
 			DeleteByQuery(c)
 
 			if test.want.success.outcome {
-				time.Sleep(time.Second)
+				utils.WaitWAL(t, index)
 				assertHTTPResponse(t, w, test.want.success.statusCode, test.want.success.body)
 				assertZeruResultQuery(t, index, test.arg.query)
 			} else {

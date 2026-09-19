@@ -58,6 +58,10 @@ type Config struct {
 	BackupRetry time.Duration
 	// BackupRetention is how many backups are kept. Default 3.
 	BackupRetention int
+	// OrphanGrace is how old an object of the blob store that the state does not
+	// know has to be before Prune deletes it (an upload whose record was never
+	// written). Default 24h; a negative value only reports orphans.
+	OrphanGrace time.Duration
 	// DrainTimeout bounds waiting for a node to pause and drain before a backup. Default 10m.
 	DrainTimeout time.Duration
 	// VerifyInterval is the time between verifications of the stored backups.
@@ -106,6 +110,9 @@ func (c *Config) defaults() error {
 	}
 	if c.BackupRetention == 0 {
 		c.BackupRetention = 3
+	}
+	if c.OrphanGrace == 0 {
+		c.OrphanGrace = 24 * time.Hour
 	}
 	if c.Now == nil {
 		c.Now = time.Now

@@ -111,7 +111,7 @@ func TestIndex_CreateUpdateDocument(t *testing.T) {
 			}
 
 			// wait for WAL write to index
-			time.Sleep(time.Second)
+			waitWAL(t, index)
 
 			assert.NoError(t, err)
 			query := &meta.ZincQuery{
@@ -193,7 +193,7 @@ func TestIndex_UpdateDocument(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for WAL write to index
-		time.Sleep(time.Second)
+		waitWAL(t, index)
 	})
 
 	for _, tt := range tests {
@@ -250,7 +250,7 @@ func TestIndex_GetDocument(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for WAL write to index
-		time.Sleep(time.Second)
+		waitWAL(t, index)
 	})
 
 	for _, tt := range tests {
@@ -310,7 +310,7 @@ func TestIndex_DeleteDocument(t *testing.T) {
 		assert.NoError(t, err)
 
 		// wait for WAL write to index
-		time.Sleep(time.Second)
+		waitWAL(t, index)
 	})
 
 	for _, tt := range tests {
@@ -487,7 +487,7 @@ func TestIndex_CreateUpdateDocumentWithDateField(t *testing.T) {
 			assert.NoError(t, err)
 
 			// wait for WAL write to index
-			time.Sleep(time.Second)
+			waitWAL(t, index)
 
 			var query *meta.ZincQuery
 			if tt.isRange {

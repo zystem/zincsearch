@@ -348,6 +348,9 @@ func run() error {
 	if cfg.FailThreshold, err = envInt("COORD_FAIL_THRESHOLD", 0); err != nil {
 		return err
 	}
+	if cfg.OrphanGrace, err = envDuration("COORD_ORPHAN_GRACE", 0); err != nil {
+		return err
+	}
 	if cfg.BackupRetention, err = envInt("COORD_BACKUP_RETENTION", 0); err != nil {
 		return err
 	}

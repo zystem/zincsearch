@@ -94,7 +94,8 @@ backup instead of letting it silently miss data.
 ```
 
 `lag` is how many messages the node is behind. `last_error` and
-`last_error_time` appear while something is wrong.
+`last_error_time` describe the most recent problem (a skipped message, a lost
+connection); they are kept until the node restarts, so check `last_error_time`.
 
 | Endpoint                    | Purpose                                                            |
 |-----------------------------|--------------------------------------------------------------------|

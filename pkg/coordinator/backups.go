@@ -300,8 +300,8 @@ func (c *Coordinator) Prune(ctx context.Context) error {
 			keep[r.Name] = true
 		}
 	}
-	c.warnAboutOrphans(ctx, recs)
 	if usable == 0 {
+		c.handleOrphans(ctx, recs, false)
 		return nil
 	}
 	for _, r := range recs {
@@ -325,13 +325,16 @@ func (c *Coordinator) Prune(ctx context.Context) error {
 		}
 		log.Info().Str("backup", r.Name).Str("status", string(r.Status)).Msg("coordinator: backup pruned")
 	}
+	c.handleOrphans(ctx, recs, true)
 	return errors.Join(errs...)
 }
 
-// warnAboutOrphans logs the backups in the blob store that the state does not
-// know, e.g. after a crash between the upload and the record. They are never
-// deleted automatically: when the state was lost they may be the only copies.
-func (c *Coordinator) warnAboutOrphans(ctx context.Context, recs []BackupRecord) {
+// handleOrphans deals with backups in the blob store that the state does not
+// know, e.g. after a crash between the upload and the record. They are deleted
+// only when it is provably safe: the state knows a usable backup (so it was not
+// lost), and the object is older than OrphanGrace (so it is not an upload that
+// is still being recorded). Otherwise they are only reported.
+func (c *Coordinator) handleOrphans(ctx context.Context, recs []BackupRecord, mayDelete bool) {
 	known := make(map[string]bool, len(recs))
 	for _, r := range recs {
 		known[r.Name] = true
@@ -340,14 +343,26 @@ func (c *Coordinator) warnAboutOrphans(ctx context.Context, recs []BackupRecord)
 	if err != nil {
 		return
 	}
-	var orphans []string
+	mayDelete = mayDelete && len(recs) > 0 && c.cfg.OrphanGrace > 0
+	now := c.cfg.Now()
+	var kept []string
 	for _, in := range infos {
-		if !known[in.Name] && strings.HasSuffix(in.Name, ".tgz") {
-			orphans = append(orphans, in.Name)
+		if known[in.Name] || !strings.HasSuffix(in.Name, ".tgz") {
+			continue
 		}
+		if mayDelete && now.Sub(in.ModTime) > c.cfg.OrphanGrace {
+			if err := c.blobs.Delete(ctx, in.Name); err != nil {
+				log.Error().Err(err).Str("object", in.Name).Msg("coordinator: delete orphan backup object")
+				kept = append(kept, in.Name)
+				continue
+			}
+			log.Warn().Str("object", in.Name).Msg("coordinator: orphan backup object deleted")
+			continue
+		}
+		kept = append(kept, in.Name)
 	}
-	if len(orphans) > 0 {
-		log.Warn().Strs("objects", orphans).Msg("coordinator: backups in the blob store that the state does not know; they are kept, remove them by hand if they are not needed")
+	if len(kept) > 0 {
+		log.Warn().Strs("objects", kept).Msg("coordinator: backups in the blob store that the state does not know; they are kept")
 	}
 }
 
