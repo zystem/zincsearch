@@ -140,7 +140,8 @@ func TestS3(t *testing.T) {
 //	ZINC_TEST_S3_ENDPOINT=127.0.0.1:3900 ZINC_TEST_S3_BUCKET=backups \
 //	ZINC_TEST_S3_KEY=... ZINC_TEST_S3_SECRET=... go test ./pkg/coordinator/blob -run RealServer
 //
-// Set ZINC_TEST_S3_SECURE=true for https. The bucket has to exist; the test only
+// Set ZINC_TEST_S3_SECURE=true for https, and ZINC_TEST_S3_REGION when the server
+// answers the region lookup badly (S3 Ninja: us-east-1). The bucket has to exist; the test only
 // touches objects below the prefix "zinc-test/".
 func TestS3RealServer(t *testing.T) {
 	endpoint := os.Getenv("ZINC_TEST_S3_ENDPOINT")
@@ -151,6 +152,7 @@ func TestS3RealServer(t *testing.T) {
 		Endpoint:  endpoint,
 		Bucket:    os.Getenv("ZINC_TEST_S3_BUCKET"),
 		Prefix:    "zinc-test/",
+		Region:    os.Getenv("ZINC_TEST_S3_REGION"),
 		AccessKey: os.Getenv("ZINC_TEST_S3_KEY"),
 		SecretKey: os.Getenv("ZINC_TEST_S3_SECRET"),
 		Secure:    os.Getenv("ZINC_TEST_S3_SECURE") == "true",
