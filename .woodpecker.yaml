@@ -1,0 +1,54 @@
+when:
+  - event: manual
+  - event: pull_request
+  - event: push
+    branch: main
+  - event: tag
+    ref: refs/tags/*
+
+variables:
+  - &go_image golang:1.26
+
+steps:
+  - name: test
+    image: *go_image
+    environment:
+      ZINC_FIRST_ADMIN_USER: admin
+      ZINC_FIRST_ADMIN_PASSWORD: Complexpass#123
+    commands:
+      # The UI is embedded at build time; tests do not need the real one.
+      - mkdir -p frontend/dist && touch frontend/dist/index.html
+      - go vet ./pkg/... ./cmd/...
+      - go test -p 1 ./pkg/streaming/... ./pkg/coordinator/... ./pkg/backup/... ./pkg/core/... ./pkg/metadata/... ./pkg/handlers/...
+
+  - name: build
+    image: *go_image
+    commands:
+      - mkdir -p frontend/dist && touch frontend/dist/index.html
+      - |
+        set -e
+        mkdir -p dist
+        for arch in amd64 arm64; do
+          out=build/$arch
+          mkdir -p $out
+          for cmd in zincsearch zinccoordinator; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w" -o $out/$cmd ./cmd/$cmd
+          done
+          tar -C $out -czf dist/zincsearch-coordinator-linux-$arch.tar.gz zincsearch zinccoordinator
+        done
+    depends_on:
+      - test
+
+  - name: release
+    image: woodpeckerci/plugin-release:0.3.1
+    settings:
+      api-key:
+        from_secret: github_token
+      files:
+        - dist/*.tar.gz
+      file-exists: fail
+      generate-release-notes: true
+    depends_on:
+      - build
+    when:
+      - event: tag
