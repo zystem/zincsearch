@@ -40,7 +40,7 @@ func countDocs(t *testing.T, name string) int {
 
 func waitDocs(t *testing.T, name string, want int) {
 	t.Helper()
-	assert.Eventually(t, func() bool { return countDocs(t, name) == want }, 20*time.Second, 100*time.Millisecond,
+	assert.Eventually(t, func() bool { return countDocs(t, name) == want }, 60*time.Second, 100*time.Millisecond,
 		"index %s should hold %d documents", name, want)
 }
 

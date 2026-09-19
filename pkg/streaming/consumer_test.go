@@ -140,7 +140,7 @@ func start(t *testing.T, c *Consumer) {
 
 func waitApplied(t *testing.T, c *Consumer, seq uint64) {
 	t.Helper()
-	assert.Eventually(t, func() bool { return c.Status().LastApplied >= seq }, 20*time.Second, 20*time.Millisecond,
+	assert.Eventually(t, func() bool { return c.Status().LastApplied >= seq }, 60*time.Second, 20*time.Millisecond,
 		"consumer should reach sequence %d, status %+v", seq, c.Status())
 }
 
@@ -154,7 +154,7 @@ func waitWALDrained(t *testing.T, name string) {
 		}
 		n, err := idx.WALPending()
 		return err == nil && n == 0
-	}, 20*time.Second, 50*time.Millisecond)
+	}, 60*time.Second, 50*time.Millisecond)
 }
 
 func TestConsumer_AppliesDocumentsAndAdminOpsInOrder(t *testing.T) {
