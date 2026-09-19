@@ -180,6 +180,11 @@ func applyCreateIndex(m *Message) error {
 			return permanent("create_index data: %v", err)
 		}
 	}
+	// The envelope names the index; a body that names another one would make the
+	// existence check above look at a different index than the one created.
+	if simple.Name != "" && simple.Name != m.Index {
+		return permanent("create_index: index %q does not match data.name %q", m.Index, simple.Name)
+	}
 	// Reject input that the worker would refuse, so a bad message is skipped and
 	// only genuine I/O failures are retried.
 	settings := simple.Settings

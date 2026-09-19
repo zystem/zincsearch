@@ -190,3 +190,21 @@ func TestCoreApplier_InvalidDocumentIsPermanentAndDoesNotBlockTheBatch(t *testin
 	require.NoError(t, a.Flush())
 	waitDocs(t, name, 2)
 }
+
+func TestCoreApplier_CreateIndexRejectsAMismatchingName(t *testing.T) {
+	const name = "streaming_apply_mismatch"
+	a := NewCoreApplier()
+	t.Cleanup(func() { _ = core.DeleteIndex(name); _ = core.DeleteIndex(name + "_other") })
+
+	m := mustAdmin(t, name, OpCreateIndex, map[string]interface{}{"name": name + "_other"})
+	for i := 0; i < 2; i++ { // a redelivery must give the same answer
+		err := a.Apply(1, m)
+		require.Error(t, err)
+		assert.True(t, IsPermanent(err), "got %v", err)
+	}
+	_, ok := core.GetIndex(name + "_other")
+	assert.False(t, ok, "nothing is created under the other name")
+
+	require.NoError(t, a.Apply(2, mustAdmin(t, name, OpCreateIndex, map[string]interface{}{"name": name})))
+	require.NoError(t, a.Apply(2, mustAdmin(t, name, OpCreateIndex, map[string]interface{}{"name": name})))
+}

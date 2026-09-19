@@ -317,3 +317,18 @@ func TestPublisherParksAtOnceWhileTheConnectionIsDown(t *testing.T) {
 	assert.Less(t, time.Since(started), time.Second, "the 30s acknowledgement timeout is not waited for")
 	assert.Equal(t, uint64(1), buf.Stats().Count)
 }
+
+func TestPublisherBuffersFromTheStartWhenNATSIsDown(t *testing.T) {
+	n := newNATSServer(t)
+	n.createStream()
+	n.stop()
+
+	p, buf := testPublisher(t, n, 1<<20)
+	require.NoError(t, p.Publish(context.Background(), line(1)), "the server limit is unknown yet, the message is buffered")
+	require.NoError(t, p.PublishDocs(context.Background(), "logs", []wire.Doc{{Doc: map[string]interface{}{"n": 2}}}))
+	assert.Equal(t, uint64(2), buf.Stats().Count)
+
+	n.start()
+	require.Eventually(t, func() bool { return buf.Stats().Count == 0 }, 20*time.Second, 20*time.Millisecond)
+	assert.Len(t, n.readAll(), 2)
+}

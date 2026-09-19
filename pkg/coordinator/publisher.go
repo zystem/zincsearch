@@ -153,8 +153,8 @@ func (p *Publisher) Publish(ctx context.Context, m *wire.Message) error {
 	if err != nil {
 		return err
 	}
-	if int64(len(data)) > p.nc.MaxPayload() {
-		return fmt.Errorf("%w: %d bytes, limit %d", ErrMessageTooLarge, len(data), p.nc.MaxPayload())
+	if err := p.checkSize(data); err != nil {
+		return err
 	}
 	return p.publish(ctx, p.nextID(), data)
 }
@@ -176,10 +176,20 @@ func (p *Publisher) PublishDocs(ctx context.Context, index string, docs []wire.D
 	if err != nil {
 		return err
 	}
-	if int64(len(data)) > p.nc.MaxPayload() {
-		return fmt.Errorf("%w: %d bytes, limit %d", ErrMessageTooLarge, len(data), p.nc.MaxPayload())
+	if err := p.checkSize(data); err != nil {
+		return err
 	}
 	return p.publish(ctx, id, data)
+}
+
+// checkSize enforces the server's payload limit. Before the first connection
+// the limit is unknown (zero); the message is then accepted into the buffer.
+func (p *Publisher) checkSize(data []byte) error {
+	limit := p.nc.MaxPayload()
+	if limit > 0 && int64(len(data)) > limit {
+		return fmt.Errorf("%w: %d bytes, limit %d", ErrMessageTooLarge, len(data), limit)
+	}
+	return nil
 }
 
 func (p *Publisher) nextID() string { return fmt.Sprintf("%s-%d", p.id, p.seq.Add(1)) }
