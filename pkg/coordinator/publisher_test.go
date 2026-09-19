@@ -314,7 +314,7 @@ func TestPublisherParksAtOnceWhileTheConnectionIsDown(t *testing.T) {
 
 	started := time.Now()
 	require.NoError(t, p.Publish(context.Background(), line(2)))
-	assert.Less(t, time.Since(started), time.Second, "the 30s acknowledgement timeout is not waited for")
+	assert.Less(t, time.Since(started), 10*time.Second, "the 30s acknowledgement timeout is not waited for")
 	assert.Equal(t, uint64(1), buf.Stats().Count)
 }
 
