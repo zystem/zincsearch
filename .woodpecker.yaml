@@ -1,43 +1,40 @@
-when:
-  - event: manual
-  - event: pull_request
-  - event: push
-    branch: main
-  - event: tag
-    ref: refs/tags/*
-
 variables:
   - &go_image golang:1.26
+  - &buildx_image woodpeckerci/plugin-docker-buildx:5.2.0
   - &image_settings
     registry: ghcr.io
-    repo: ghcr.io/zystem/zincsearch-coordinator
+    repo: ghcr.io/${CI_REPO}-coordinator
     dockerfile: docker/Dockerfile.coordinator
     context: .
-    platforms: linux/amd64,linux/arm64
-    username:
-      from_secret: ghcr_username
-    password:
-      from_secret: ghcr_token
+    username: ${CI_NETRC_USERNAME}
+    password: ${CI_NETRC_PASSWORD}
 
 steps:
-  - name: test
+  build:
     image: *go_image
     environment:
       ZINC_FIRST_ADMIN_USER: admin
       ZINC_FIRST_ADMIN_PASSWORD: Complexpass#123
     commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
       # The UI is embedded at build time; tests do not need the real one.
       - mkdir -p frontend/dist && touch frontend/dist/index.html
       - go vet ./pkg/... ./cmd/...
       - go test -p 1 ./pkg/streaming/... ./pkg/coordinator/... ./pkg/backup/... ./pkg/core/... ./pkg/metadata/... ./pkg/handlers/...
+      - CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o build/amd64/zincsearch ./cmd/zincsearch
+      - CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o build/amd64/zinccoordinator ./cmd/zinccoordinator
+    when:
+      - event: push
+      - event: pull_request
+      - event: tag
 
-  - name: build
-    image: *go_image
+  package_release:
+    image: golang:1.26
     commands:
-      - mkdir -p frontend/dist && touch frontend/dist/index.html
+      - mkdir -p dist
       - |
         set -e
-        mkdir -p dist
+        mkdir -p frontend/dist && touch frontend/dist/index.html
         for arch in amd64 arm64; do
           out=build/$arch
           mkdir -p $out
@@ -45,53 +42,67 @@ steps:
             CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags="-s -w" -o $out/$cmd ./cmd/$cmd
           done
           tar -C $out -czf dist/zincsearch-coordinator-linux-$arch.tar.gz zincsearch zinccoordinator
+          (cd dist && sha256sum zincsearch-coordinator-linux-$arch.tar.gz > zincsearch-coordinator-linux-$arch.tar.gz.sha256)
         done
-    depends_on:
-      - test
-
-  - name: release
-    image: woodpeckerci/plugin-release:0.3.1
-    settings:
-      api-key:
-        from_secret: github_token
-      files:
-        - dist/*.tar.gz
-      file-exists: fail
-      generate-release-notes: true
     depends_on:
       - build
     when:
       - event: tag
+        ref: refs/tags/v*
 
   # Pull requests only build the image; nothing is pushed.
-  - name: image-check
-    image: woodpeckerci/plugin-docker-buildx:6.0.3
+  check_image:
+    image: *buildx_image
     settings:
       <<: *image_settings
       dry_run: true
       platforms: linux/amd64
     depends_on:
-      - test
+      - build
     when:
       - event: pull_request
 
-  - name: image-main
-    image: woodpeckerci/plugin-docker-buildx:6.0.3
+  publish_image_main:
+    image: *buildx_image
     settings:
       <<: *image_settings
-      tags: main
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      tags:
+        - main
     depends_on:
-      - test
+      - build
     when:
       - event: push
         branch: main
 
-  - name: image-release
-    image: woodpeckerci/plugin-docker-buildx:6.0.3
+  publish_image:
+    image: *buildx_image
     settings:
       <<: *image_settings
-      auto_tag: true
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      build_args:
+        - VERSION=${CI_COMMIT_TAG##v}
+      tags:
+        - ${CI_COMMIT_TAG##v}
+        - ${CI_COMMIT_TAG}
+        - latest
     depends_on:
-      - test
+      - build
     when:
       - event: tag
+        ref: refs/tags/v*
+
+  publish_release:
+    image: ghcr.io/cli/cli:2.74.2
+    commands:
+      - GH_TOKEN="$CI_NETRC_PASSWORD" gh release create "$CI_COMMIT_TAG" dist/* --generate-notes --repo "$CI_REPO" --title "$CI_COMMIT_TAG" || GH_TOKEN="$CI_NETRC_PASSWORD" gh release upload "$CI_COMMIT_TAG" dist/* --clobber --repo "$CI_REPO"
+    depends_on:
+      - package_release
+      - publish_image
+    when:
+      - event: tag
+        ref: refs/tags/v*
