@@ -21,11 +21,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/zutils/json"
 )
 
@@ -72,31 +69,4 @@ func SetGinRequestParams(c *gin.Context, params map[string]string) {
 		p = append(p, gin.Param{Key: k, Value: v})
 	}
 	c.Params = p
-}
-
-// WaitWAL blocks until every document accepted by the index is applied, which
-// is when it becomes searchable. It replaces sleeping for the WAL interval.
-func WaitWAL(t testing.TB, index *core.Index) {
-	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		pending, err := index.WALPending()
-		if err == nil && pending == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("index %s still has %d pending WAL entries (err %v)", index.GetName(), pending, err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// WaitWALByName is WaitWAL for an index that is looked up by name.
-func WaitWALByName(t testing.TB, name string) {
-	t.Helper()
-	index, ok := core.GetIndex(name)
-	if !ok {
-		t.Fatalf("index %s does not exist", name)
-	}
-	WaitWAL(t, index)
 }

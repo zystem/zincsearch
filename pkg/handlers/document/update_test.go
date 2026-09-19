@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/core/coretest"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
@@ -97,7 +98,7 @@ func TestUpdate(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "")
 
 		// wait for WAL write to index
-		utils.WaitWALByName(t, "TestDocumentUpdate.index_1")
+		coretest.WaitWALByName(t, "TestDocumentUpdate.index_1")
 	})
 
 	for _, tt := range tests {
