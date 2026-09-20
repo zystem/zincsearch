@@ -144,6 +144,21 @@ func (l *Log) Read(index uint64) ([]byte, error) {
 	return data, nil
 }
 
+// ReadCopy is Read that always returns a private copy, even when the log is
+// opened with NoCopy. Use it from a goroutine other than the one that writes.
+func (l *Log) ReadCopy(index uint64) ([]byte, error) {
+	l.lock.RLock()
+	defer l.lock.RUnlock()
+	offset, ok := l.index[index]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	valueLen := binary.LittleEndian.Uint64(l.data[offset : offset+8])
+	data := make([]byte, valueLen)
+	copy(data, l.data[offset+8:offset+8+int(valueLen)])
+	return data, nil
+}
+
 func (l *Log) Close() error {
 	l.lock.Lock()
 	l.index = nil

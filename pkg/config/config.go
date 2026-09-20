@@ -46,6 +46,7 @@ type config struct {
 	NodeID                    int           `toml:"zinc_node_id"`
 	DataPath                  string        `toml:"zinc_data_path"`
 	MetadataStorage           string        `toml:"zinc_metadata_storage"`
+	BackupPath                string        `toml:"zinc_backup_path"` // where backups are stored, must be outside zinc_data_path
 	IceCompressor             string        `toml:"zinc_ice_compressor"`
 	SentryEnable              bool          `toml:"zinc_sentry"`
 	SentryDSN                 string        `toml:"zinc_sentry_dsn"`
@@ -68,6 +69,7 @@ type config struct {
 	Cluster                   cluster
 	Shard                     shard
 	Etcd                      etcd
+	Stream                    stream
 	Plugin                    plugin
 }
 
@@ -89,6 +91,23 @@ type etcd struct {
 	Prefix    string   `toml:"zinc_etcd_prefix"`
 	Username  string   `toml:"zinc_etcd_username"`
 	Password  string   `toml:"zinc_etcd_password"`
+}
+
+// stream configures replication of this node from a NATS JetStream stream.
+type stream struct {
+	Enable bool   `toml:"zinc_stream_enable"`
+	URL    string `toml:"zinc_stream_url"`
+	// Name is the JetStream stream to consume.
+	Name string `toml:"zinc_stream_name"`
+	// Subject optionally restricts the consumed subject of the stream.
+	Subject string `toml:"zinc_stream_subject"`
+	// Consumer names this node's JetStream consumer. It must be unique per node.
+	Consumer string `toml:"zinc_stream_consumer"`
+	// Batch is the maximum number of messages applied between two flushes.
+	Batch int `toml:"zinc_stream_batch"`
+	// AllowGap continues at the first available message when the stream was
+	// trimmed past this node's offset. Messages in between are lost.
+	AllowGap bool `toml:"zinc_stream_allow_gap"`
 }
 
 type plugin struct {

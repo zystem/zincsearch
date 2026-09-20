@@ -18,11 +18,11 @@ package document
 import (
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/zincsearch/zincsearch/pkg/core"
+	"github.com/zincsearch/zincsearch/pkg/core/coretest"
 	"github.com/zincsearch/zincsearch/test/utils"
 )
 
@@ -101,7 +101,7 @@ func TestGet(t *testing.T) {
 		assert.Contains(t, w.Body.String(), `"id":"1"`)
 
 		// wait for WAL write to index
-		time.Sleep(time.Second)
+		coretest.WaitWALByName(t, indexName)
 	})
 
 	for _, tt := range tests {

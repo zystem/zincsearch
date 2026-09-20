@@ -108,6 +108,27 @@ func (t *badgerStorage) Delete(key string) error {
 	})
 }
 
+// Dump returns every key with its value from one consistent snapshot.
+func (t *badgerStorage) Dump() (map[string][]byte, error) {
+	data := make(map[string][]byte)
+	err := t.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = true
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		for it.Rewind(); it.Valid(); it.Next() {
+			item := it.Item()
+			value, err := item.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			data[string(item.KeyCopy(nil))] = value
+		}
+		return nil
+	})
+	return data, err
+}
+
 func (t *badgerStorage) Close() error {
 	return t.db.Close()
 }

@@ -31,11 +31,13 @@ import (
 	"github.com/grafana/pyroscope-go"
 	"github.com/rs/zerolog/log"
 
+	"github.com/zincsearch/zincsearch/pkg/backup"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/core"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/metadata"
 	"github.com/zincsearch/zincsearch/pkg/routes"
+	"github.com/zincsearch/zincsearch/pkg/streaming"
 )
 
 // @title           Zinc Search engine API
@@ -58,6 +60,15 @@ func main() {
 		fmt.Printf("zinc version %s\n", meta.Version)
 		os.Exit(0)
 	}
+	// Backup commands run instead of the server
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "restore":
+			os.Exit(restoreBackup(os.Args[2:]))
+		case "verify-backup":
+			os.Exit(verifyBackup(os.Args[2:]))
+		}
+	}
 	log.Info().Msgf("Starting Zinc %s", meta.Version)
 
 	// Initialize telemetry
@@ -70,6 +81,14 @@ func main() {
 	// HTTP init
 	app := gin.New()
 	routes.Setup(app)
+
+	// Replicate from the JetStream stream
+	if config.Global.Stream.Enable {
+		if _, err := streaming.StartFromConfig(); err != nil {
+			log.Fatal().Err(err).Msg("Stream consumer")
+		}
+		log.Info().Str("stream", config.Global.Stream.Name).Str("consumer", config.Global.Stream.Consumer).Msg("Stream consumer started")
+	}
 
 	// Run the server
 	PORT := config.Global.ServerPort
@@ -90,6 +109,9 @@ func main() {
 		} else if err := server.Close(); err != nil {
 			log.Error().Err(err).Msg("Server Close")
 		}
+
+		// stop consuming before indexes close, the batch in flight is made durable
+		streaming.Shutdown()
 
 		log.Info().Msg("Index closing...")
 		// close indexes
@@ -219,4 +241,63 @@ func shutdown(stop func(grace bool, done chan<- struct{})) <-chan struct{} {
 		os.Exit(128 + int(s.(syscall.Signal))) // second signal. Exit directly.
 	}()
 	return done
+}
+
+// restoreBackup puts a backup into this node. The node must not have any index.
+// Run it before the first start of a new node, then start the server as usual:
+// it resumes the stream after the last message the backup contains.
+func restoreBackup(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: zincsearch restore <backup.tgz>")
+		return 2
+	}
+	manifest, err := backup.Restore(context.Background(), args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "restore failed: %v\n", err)
+		return 1
+	}
+	if err := metadata.Close(); err != nil {
+		fmt.Fprintf(os.Stderr, "close metadata: %v\n", err)
+		return 1
+	}
+	fmt.Printf("restored %d indexes into %s, created %s, stream offset %d\n",
+		len(manifest.Indexes), config.Global.DataPath, manifest.CreatedAt.Format(time.RFC3339), manifest.LastApplied)
+	return 0
+}
+
+// verifyBackup checks a backup file against its manifest without touching the
+// running node. With --deep it also restores the archive and compares the
+// number of documents of every index; that needs an empty ZINC_DATA_PATH, use a
+// scratch directory.
+func verifyBackup(args []string) int {
+	deep := false
+	if len(args) > 0 && args[0] == "--deep" {
+		deep, args = true, args[1:]
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: zincsearch verify-backup [--deep] <backup.tgz>")
+		return 2
+	}
+	var manifest *backup.Manifest
+	var err error
+	if deep {
+		manifest, err = backup.VerifyDeep(context.Background(), args[0])
+	} else {
+		manifest, err = backup.Verify(context.Background(), args[0])
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "backup is not valid: %v\n", err)
+		return 1
+	}
+	docs := uint64(0)
+	for _, n := range manifest.Docs {
+		docs += n
+	}
+	mode := "checksums"
+	if deep {
+		mode = "restored and counted"
+	}
+	fmt.Printf("ok (%s): %d indexes, %d documents, %d files, created %s, stream offset %d\n",
+		mode, len(manifest.Indexes), docs, len(manifest.Files), manifest.CreatedAt.Format(time.RFC3339), manifest.LastApplied)
+	return 0
 }

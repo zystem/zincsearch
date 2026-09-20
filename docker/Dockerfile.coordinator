@@ -1,0 +1,32 @@
+# The ZincSearch coordinator: publishes to NATS JetStream, watches the nodes,
+# fails over, and schedules and verifies backups. See docs/coordinator.md.
+#
+# Build from the repository root:
+#   docker build -f docker/Dockerfile.coordinator -t zinc-coordinator .
+FROM golang:1.26 AS builder
+ARG VERSION=dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+# The zincsearch binary is only used for `verify-backup --deep` (COORD_ZINC_BIN),
+# which never serves the UI, so an empty embedded frontend is enough.
+RUN mkdir -p frontend/dist && [ -e frontend/dist/index.html ] || touch frontend/dist/index.html
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/zinccoordinator ./cmd/zinccoordinator \
+ && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/zincsearch ./cmd/zincsearch
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates \
+ && addgroup -g 10001 zinc && adduser -D -u 10001 -G zinc -h /var/lib/zinc-coordinator zinc \
+ && mkdir -p /var/lib/zinc-coordinator /work && chown zinc:zinc /var/lib/zinc-coordinator /work
+COPY --from=builder /out/zinccoordinator /usr/local/bin/zinccoordinator
+COPY --from=builder /out/zincsearch /usr/local/bin/zincsearch
+USER zinc:zinc
+ENV COORD_BUFFER_DIR=/var/lib/zinc-coordinator \
+    COORD_WORK_DIR=/work \
+    COORD_ZINC_BIN=/usr/local/bin/zincsearch \
+    COORD_LISTEN=:8080
+VOLUME /var/lib/zinc-coordinator
+HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/zinccoordinator"]

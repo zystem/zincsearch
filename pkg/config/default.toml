@@ -9,6 +9,8 @@ zinc_node_id = 1
 zinc_data_path = "./data"
 zinc_metadata_storage = "bolt"
 zinc_ice_compressor = "zstd"
+# Directory for backups created through /api/backup. Must be outside zinc_data_path.
+# zinc_backup_path = ""
 # 
 # zinc_sentry = true
 # zinc_sentry_dsn = ""
@@ -41,6 +43,18 @@ zinc_shard_max_size = 1073741824
 
 [Etcd]
 zinc_etcd_prefix = "/zinc"
+
+[Stream]
+# Consume a NATS JetStream stream. All nodes of a cluster consume the same stream
+# and stay identical without talking to each other.
+zinc_stream_enable = false
+# zinc_stream_url = "nats://127.0.0.1:4222"
+zinc_stream_name = "zinc"
+# zinc_stream_subject = ""
+# Must be unique per node.
+# zinc_stream_consumer = ""
+zinc_stream_batch = 256
+zinc_stream_allow_gap = false
 
 [Plugin.GSE]
 zinc_plugin_gse_enable = false

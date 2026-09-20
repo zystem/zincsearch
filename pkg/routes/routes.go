@@ -28,9 +28,11 @@ import (
 	"github.com/zincsearch/zincsearch"
 	"github.com/zincsearch/zincsearch/pkg/config"
 	"github.com/zincsearch/zincsearch/pkg/handlers/auth"
+	"github.com/zincsearch/zincsearch/pkg/handlers/backup"
 	"github.com/zincsearch/zincsearch/pkg/handlers/document"
 	"github.com/zincsearch/zincsearch/pkg/handlers/index"
 	"github.com/zincsearch/zincsearch/pkg/handlers/search"
+	"github.com/zincsearch/zincsearch/pkg/handlers/stream"
 	"github.com/zincsearch/zincsearch/pkg/meta"
 	"github.com/zincsearch/zincsearch/pkg/meta/elastic"
 	"github.com/zincsearch/zincsearch/pkg/zutils"
@@ -122,6 +124,17 @@ func SetRoutes(r *gin.Engine) {
 	// analyze
 	r.POST("/api/_analyze", AuthMiddleware("index.Analyze"), index.Analyze)
 	r.POST("/api/:target/_analyze", AuthMiddleware("index.Analyze"), index.Analyze)
+
+	// stream consumer control
+	r.GET("/api/stream/status", AuthMiddleware("stream.Status"), stream.Status)
+	r.POST("/api/stream/pause", AuthMiddleware("stream.Pause"), stream.Pause)
+	r.POST("/api/stream/resume", AuthMiddleware("stream.Resume"), stream.Resume)
+
+	// backup
+	r.GET("/api/backup", AuthMiddleware("backup.List"), backup.List)
+	r.POST("/api/backup", AuthMiddleware("backup.Create"), backup.Create)
+	r.GET("/api/backup/:name", AuthMiddleware("backup.Get"), backup.Get)
+	r.DELETE("/api/backup/:name", AuthMiddleware("backup.Delete"), backup.Delete)
 
 	// search
 	r.POST("/api/:target/_search", AuthMiddleware("search.SearchV1"), search.SearchV1)

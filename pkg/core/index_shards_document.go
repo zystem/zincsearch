@@ -177,12 +177,12 @@ func (s *IndexShard) CheckDocument(docID string, doc map[string]interface{}, upd
 		case []interface{}:
 			for i, v := range v {
 				if err := s.checkField(mappings, flatDoc, key, v, i, true); err != nil {
-					return nil, err
+					return nil, &InvalidDocumentError{Err: err}
 				}
 			}
 		default:
 			if err := s.checkField(mappings, flatDoc, key, v, 0, false); err != nil {
-				return nil, err
+				return nil, &InvalidDocumentError{Err: err}
 			}
 		}
 	}
@@ -204,7 +204,7 @@ func (s *IndexShard) CheckDocument(docID string, doc map[string]interface{}, upd
 		prop, _ := mappings.GetProperty(meta.TimeFieldName)
 		v, err := zutils.ParseTime(value, prop.Format, prop.TimeZone)
 		if err != nil {
-			return nil, fmt.Errorf("field [%s] value [%v] parse err: %s", meta.TimeFieldName, value, err.Error())
+			return nil, &InvalidDocumentError{Err: fmt.Errorf("field [%s] value [%v] parse err: %s", meta.TimeFieldName, value, err.Error())}
 		}
 		timestamp = v
 	}
@@ -222,6 +222,13 @@ func (s *IndexShard) CheckDocument(docID string, doc map[string]interface{}, upd
 
 	return json.Marshal(flatDoc)
 }
+
+// InvalidDocumentError reports a document that does not fit the index mapping.
+// Retrying it cannot succeed, unlike a storage failure.
+type InvalidDocumentError struct{ Err error }
+
+func (e *InvalidDocumentError) Error() string { return e.Err.Error() }
+func (e *InvalidDocumentError) Unwrap() error { return e.Err }
 
 // checkProperty returns if need update mappings
 func (s *IndexShard) checkProperty(mappings *meta.Mappings, key string, value interface{}) bool {

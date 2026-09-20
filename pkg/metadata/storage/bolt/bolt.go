@@ -118,6 +118,24 @@ func (t *boltStorage) Delete(key string) error {
 	})
 }
 
+// Dump returns every key with its value from one consistent read transaction.
+// Bucket names already start with "/", so the full key is bucket + "/" + name.
+func (t *boltStorage) Dump() (map[string][]byte, error) {
+	data := make(map[string][]byte)
+	err := t.db.View(func(txn *bbolt.Tx) error {
+		return txn.ForEach(func(bucket []byte, b *bbolt.Bucket) error {
+			return b.ForEach(func(k, v []byte) error {
+				if v == nil {
+					return nil // nested bucket, the metadata does not use them
+				}
+				data[string(bucket)+"/"+string(k)] = append([]byte(nil), v...)
+				return nil
+			})
+		})
+	})
+	return data, err
+}
+
 func (t *boltStorage) Close() error {
 	return t.db.Close()
 }

@@ -1,0 +1,63 @@
+# Two ZincSearch nodes, NATS JetStream, s3proxy as S3 and the coordinator.
+# Build the image first: docker build -f docker/Dockerfile.coordinator -t zinc-coordinator:test .
+# Create the bucket once: docker compose exec s3 mkdir -p /data/zinc-backups
+name: zinc-e2e
+services:
+  nats:
+    image: nats:2.10
+    command: ["-js", "-sd", "/data"]
+    ports: ["14222:4222"]
+  s3:
+    image: andrewgaul/s3proxy:latest
+    environment:
+      S3PROXY_IDENTITY: local-identity
+      S3PROXY_CREDENTIAL: local-credential
+      JCLOUDS_PROVIDER: filesystem-nio2
+      JCLOUDS_FILESYSTEM_BASEDIR: /data
+    volumes: [s3data:/data]
+  node-a: &node
+    image: zinc-coordinator:test
+    entrypoint: ["/usr/local/bin/zincsearch"]
+    environment: &nodeenv
+      ZINC_FIRST_ADMIN_USER: admin
+      ZINC_FIRST_ADMIN_PASSWORD: secret
+      ZINC_DATA_PATH: /data
+      ZINC_BACKUP_PATH: /backups
+      ZINC_STREAM_ENABLE: "true"
+      ZINC_STREAM_URL: nats://nats:4222
+      ZINC_STREAM_NAME: zinc
+      ZINC_STREAM_CONSUMER: node-a
+      ZINC_TELEMETRY: "false"
+      ZINC_SENTRY: "false"
+    user: root
+    depends_on: [nats]
+  node-b:
+    <<: *node
+    environment:
+      <<: *nodeenv
+      ZINC_STREAM_CONSUMER: node-b
+  coordinator:
+    image: zinc-coordinator:test
+    user: root
+    environment:
+      COORD_NATS_URL: nats://nats:4222
+      COORD_STATE: natskv
+      COORD_ENSURE_STREAM: "true"
+      COORD_NODES: a=http://node-a:4080,b=http://node-b:4080
+      COORD_NODE_USER: admin
+      COORD_NODE_PASSWORD: secret
+      COORD_BLOB: s3
+      COORD_S3_ENDPOINT: s3:80
+      COORD_S3_BUCKET: zinc-backups
+      COORD_S3_KEY: local-identity
+      COORD_S3_SECRET: local-credential
+      COORD_S3_PATH_STYLE: "true"
+      COORD_BACKUP_INTERVAL: 20s
+      COORD_VERIFY_INTERVAL: 40s
+      COORD_BACKUP_RETENTION: 2
+      COORD_POLL_INTERVAL: 1s
+      COORD_TOKEN: tok
+    ports: ["18080:8080"]
+    depends_on: [nats, s3, node-a, node-b]
+volumes:
+  s3data:

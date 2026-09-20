@@ -155,6 +155,7 @@ func TestTOMLDefaults(t *testing.T) {
 	assert.Equal(t, cluster{Name: "ZincCluster"}, c.Cluster)
 	assert.Equal(t, shard{GoroutineNum: 3, Num: 3, MaxSize: 1073741824}, c.Shard)
 	assert.Equal(t, etcd{Prefix: "/zinc"}, c.Etcd)
+	assert.Equal(t, stream{Name: "zinc", Batch: 256}, c.Stream)
 	assert.Equal(t, gse{
 		EnableStop: true,
 		EnableHMM:  true,
