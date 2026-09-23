@@ -6,8 +6,6 @@ variables:
     repo: ghcr.io/${CI_REPO}-coordinator
     dockerfile: docker/Dockerfile.coordinator
     context: .
-    username: ${CI_NETRC_USERNAME}
-    password: ${CI_NETRC_PASSWORD}
 
 steps:
   build:
@@ -67,6 +65,9 @@ steps:
     image: *buildx_image
     settings:
       <<: *image_settings
+      username: ${CI_REPO_OWNER}
+      password:
+        from_secret: ghcr_token
       platforms:
         - linux/amd64
         - linux/arm64
@@ -82,6 +83,9 @@ steps:
     image: *buildx_image
     settings:
       <<: *image_settings
+      username: ${CI_REPO_OWNER}
+      password:
+        from_secret: ghcr_token
       platforms:
         - linux/amd64
         - linux/arm64
@@ -98,9 +102,15 @@ steps:
         ref: refs/tags/v*
 
   publish_release:
-    image: ghcr.io/cli/cli:2.74.2
-    commands:
-      - GH_TOKEN="$CI_NETRC_PASSWORD" gh release create "$CI_COMMIT_TAG" dist/* --generate-notes --repo "$CI_REPO" --title "$CI_COMMIT_TAG" || GH_TOKEN="$CI_NETRC_PASSWORD" gh release upload "$CI_COMMIT_TAG" dist/* --clobber --repo "$CI_REPO"
+    image: woodpeckerci/plugin-release:0.3.1
+    settings:
+      api-key:
+        from_secret: github_token
+      files:
+        - dist/*
+      file-exists: overwrite
+      generate-release-notes: true
+      title: ${CI_COMMIT_TAG}
     depends_on:
       - package_release
       - publish_image
